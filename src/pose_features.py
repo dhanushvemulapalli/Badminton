@@ -26,44 +26,46 @@ def compute_angle(a, b, c):
 
 def extract_pose_features(pose_landmarks):
     """
-    pose_landmarks: np.array of shape (33, 3)
+    pose_landmarks: np.array of shape (33, 4) with x,y,z,visibility
     Returns: dict of joint angles and body distances
     """
-
+    # Take only x,y,z coordinates (ignore visibility)
+    landmarks = pose_landmarks[:, :3]
+    
     features = {}
 
     # Joint angles
     features['left_elbow_angle'] = compute_angle(
-        pose_landmarks[LEFT_SHOULDER],
-        pose_landmarks[LEFT_ELBOW],
-        pose_landmarks[LEFT_WRIST]
+        landmarks[LEFT_SHOULDER],
+        landmarks[LEFT_ELBOW],
+        landmarks[LEFT_WRIST]
     )
     features['right_elbow_angle'] = compute_angle(
-        pose_landmarks[RIGHT_SHOULDER],
-        pose_landmarks[RIGHT_ELBOW],
-        pose_landmarks[RIGHT_WRIST]
+        landmarks[RIGHT_SHOULDER],
+        landmarks[RIGHT_ELBOW],
+        landmarks[RIGHT_WRIST]
     )
     features['left_knee_angle'] = compute_angle(
-        pose_landmarks[LEFT_HIP],
-        pose_landmarks[LEFT_KNEE],
-        pose_landmarks[LEFT_ANKLE]
+        landmarks[LEFT_HIP],
+        landmarks[LEFT_KNEE],
+        landmarks[LEFT_ANKLE]
     )
     features['right_knee_angle'] = compute_angle(
-        pose_landmarks[RIGHT_HIP],
-        pose_landmarks[RIGHT_KNEE],
-        pose_landmarks[RIGHT_ANKLE]
+        landmarks[RIGHT_HIP],
+        landmarks[RIGHT_KNEE],
+        landmarks[RIGHT_ANKLE]
     )
 
     # Distances
     features['shoulder_width'] = np.linalg.norm(
-        pose_landmarks[LEFT_SHOULDER] - pose_landmarks[RIGHT_SHOULDER]
+        landmarks[LEFT_SHOULDER] - landmarks[RIGHT_SHOULDER]
     )
     features['hip_width'] = np.linalg.norm(
-        pose_landmarks[LEFT_HIP] - pose_landmarks[RIGHT_HIP]
+        landmarks[LEFT_HIP] - landmarks[RIGHT_HIP]
     )
     features['torso_length'] = np.linalg.norm(
-        (pose_landmarks[LEFT_SHOULDER] + pose_landmarks[RIGHT_SHOULDER]) / 2 -
-        (pose_landmarks[LEFT_HIP] + pose_landmarks[RIGHT_HIP]) / 2
+        (landmarks[LEFT_SHOULDER] + landmarks[RIGHT_SHOULDER]) / 2 -
+        (landmarks[LEFT_HIP] + landmarks[RIGHT_HIP]) / 2
     )
 
     return features

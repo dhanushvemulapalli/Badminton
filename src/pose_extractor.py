@@ -1,11 +1,16 @@
-import cv2
+from pose_normalizer import normalize_pose  # assumes you have this implemented
+from pose_features import extract_pose_features
 import mediapipe as mp
+
+
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose()
+mp_drawing = mp.solutions.drawing_utils
+
+import cv2
 import os
 import numpy as np
 import pandas as pd
-from pose_normalizer import normalize_pose  # assumes you have this implemented
-from pose_features import extract_pose_features
-
 
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose()
@@ -30,17 +35,27 @@ def extract_keypoints(video_path, output_csv, save_frames=False, frame_dir=""):
             for lm in landmarks:
                 keypoints.extend([lm.x, lm.y, lm.z, lm.visibility])
             
-            # ✅ Normalize the keypoints
-            xyz = np.array(keypoints).reshape((33, 4))[:, :3]  # Take only x, y, z
-            normalized_keypoints = normalize_pose(xyz)  # Pass 33x3 to normalizer
+            # Reshape to 33x4 (x, y, z, visibility)
+            xyzv = np.array(keypoints).reshape((33, 4))
+            
+            # Normalize only the xyz coordinates
+            normalized_xyz = normalize_pose(xyzv[:, :3])  # Returns (33, 3)
+            
+            # Combine normalized xyz with original visibility
+            normalized_xyzv = np.hstack([normalized_xyz, xyzv[:, 3:4]])  # (33, 4)
+            
+            # Add frame number and flatten for CSV storage
+            row_data = [frame_count] + normalized_xyzv.flatten().tolist()
+            keypoints_list.append(row_data)
 
-            # Now flatten and append to list
-            keypoints_list.append([frame_count] + normalized_keypoints)
+            # Extract pose features
+            try:
+                pose_features = extract_pose_features(normalized_xyzv)
+                print(f"Frame {frame_count} features: {pose_features}")
+            except Exception as e:
+                print(f"Error extracting features for frame {frame_count}: {e}")
 
-            pose_features = extract_pose_features(normalized_keypoints)
-            print("Frame features:", pose_features)
-
-            # ✅ Optionally save annotated frame
+            # Optionally save annotated frame
             if save_frames:
                 annotated = frame.copy()
                 mp_drawing.draw_landmarks(annotated, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
@@ -53,22 +68,19 @@ def extract_keypoints(video_path, output_csv, save_frames=False, frame_dir=""):
 
     cap.release()
 
-    # ✅ Add column names
-    columns = ["frame"] + [f"{joint}_{axis}" for joint in range(33) for axis in ["x", "y", "z"]]
-
-
-
-    # print("Sample keypoints[0]:", keypoints_list[0])
-    # print("Length:", len(keypoints_list[0]))
-
-    df = pd.DataFrame(keypoints_list, columns=columns)
+    # Create column names: frame + 33 joints * 4 values each
+    columns = ["frame"] + [f"joint_{i}_{axis}" for i in range(33) for axis in ["x", "y", "z", "v"]]
     
-    df.to_csv(output_csv, index=False)
-    print(f"Keypoints saved to {output_csv}")
+    if keypoints_list:
+        df = pd.DataFrame(keypoints_list, columns=columns)
+        df.to_csv(output_csv, index=False)
+        print(f"Keypoints saved to {output_csv}")
+    else:
+        print("No keypoints detected in video!")
 
 # Example usage
 if __name__ == "__main__":
-    video_path = "C:/Users/dhanu/OneDrive/Desktop/Projects/Badminton/Videos/Video-1.mp4"
+    video_path = "C:/Users/dhanu/OneDrive/Desktop/Projects/Badminton/Videos/Video-2.mp4"
     extract_keypoints(
         video_path,
         "C:/Users/dhanu/OneDrive/Desktop/Projects/Badminton/Output/keypoints/sample1_keypoints.csv",

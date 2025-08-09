@@ -1,6 +1,3 @@
-All good now ✅ 1. Add compute_stance_features() to analyze_motion.py
-
-
 
 
 # Goal: 
@@ -23,7 +20,7 @@ Here’s how I suggest we break this down into concrete motion analysis modules,
 
 ---
 
-### ✅ 1. **Stance & Court Movement**
+### ✅ 1. **Stance & Court Movement** = Done
 
 **Goal**: Detect key footwork techniques like split-step, lunge, chasse, and transitions between positions.
 
@@ -35,7 +32,7 @@ Here’s how I suggest we break this down into concrete motion analysis modules,
 
 ---
 
-### ✅ 2. **Stroke Mechanics**
+### ✅ 2. **Stroke Mechanics** = Done
 
 **Goal**: Analyze the player's arm motion for different types of shots.
 
