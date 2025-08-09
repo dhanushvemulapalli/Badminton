@@ -18,9 +18,8 @@ def normalize_pose(pose_landmarks):
     mid_hip = (pose_landmarks[LEFT_HIP] + pose_landmarks[RIGHT_HIP]) / 2.0
     centered = pose_landmarks - mid_hip
 
-    # Step 2: Scaling - use shoulder width
-    # shoulder_dist = np.linalg.norm(pose_landmarks[LEFT_SHOULDER] - pose_landmarks[RIGHT_SHOULDER])
-    shoulder_dist = pose_landmarks[LEFT_SHOULDER][0] - pose_landmarks[RIGHT_SHOULDER][0]
+    # Step 2: Scaling - use shoulder width (proper Euclidean distance)
+    shoulder_dist = np.linalg.norm(pose_landmarks[LEFT_SHOULDER] - pose_landmarks[RIGHT_SHOULDER])
     
     if shoulder_dist < 0.01:
         shoulder_dist = 0.1  # prevent division by zero

@@ -9,6 +9,7 @@ import os
 from pose_extractor import extract_keypoints
 
 # Import your existing functions
+from config import ProjectPaths, AnalysisConfig
 from analyze_motion import (
     compute_stance_features, is_lunge, is_split_step, 
     compute_chasse_features, compute_stroke_mechanics,
@@ -26,46 +27,82 @@ class BadmintonVideoAnalyzer:
         self.pose = self.mp_pose.Pose()
         
     def render_analysis_video(self, video_path, keypoints_data, output_path):
-        """Use pre-generated annotated frames with pose lines"""
-        
-        # Path to your annotated frames (from your working pose extraction)
-        annotated_frames_dir = "C:/Users/dhanu/OneDrive/Desktop/Projects/Badminton/Output/annotated_frames"
-        
+        """Create analysis video with pose overlay and technique feedback"""
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video file not found: {video_path}")
+
         cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Could not open video: {video_path}")
+
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        print(f"Processing {video_path}")
+        print(f"Video info: {width}x{height}, {fps}fps, {total_frames} frames")
+        print(f"Keypoints data: {len(keypoints_data)} frames")
+
+        # Create output directory
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width * 2, height))
-        
+
+        if not out.isOpened():
+            raise ValueError(f"Could not create output video: {output_path}")
+
         frame_idx = 0
-        
-        while cap.isOpened():
-            ret, original_frame = cap.read()
-            if not ret:
-                break
-            
-            # Load the pre-annotated frame with perfect pose lines
-            annotated_frame_path = os.path.join(annotated_frames_dir, f"frame_{frame_idx:04d}.jpg")
-            
-            if os.path.exists(annotated_frame_path):
-                annotated_frame = cv2.imread(annotated_frame_path)
-                
-                # Add analysis overlays to the frame with pose lines
-                analysis_frame = self.add_analysis_overlay(annotated_frame, keypoints_data, frame_idx)
-            else:
-                # Fallback to original frame
+        processed_frames = 0
+
+        try:
+            while cap.isOpened():
+                ret, original_frame = cap.read()
+                if not ret:
+                    break
+
+                # IMPORTANT: Create analysis frame from the CURRENT original frame
+                # Don't use cached annotated frames from previous videos
                 analysis_frame = original_frame.copy()
-            
-            # Side-by-side: original | analysis with pose lines
-            combined = np.hstack([original_frame, analysis_frame])
-            out.write(combined)
-            frame_idx += 1
-        
-        cap.release()
-        out.release()
-        print(f"✅ Analysis video with pose lines saved: {output_path}")
+
+                # Only add analysis if we have keypoints data for this frame
+                if frame_idx < len(keypoints_data):
+                    # Draw pose landmarks directly on the current frame
+                    self.draw_pose_landmarks(analysis_frame, keypoints_data[frame_idx])
+                    
+                    # Add analysis overlays using the CURRENT frame's keypoints
+                    analysis_frame = self.add_analysis_overlay(analysis_frame, keypoints_data, frame_idx)
+                else:
+                    # If no keypoints available, just add a "No data" message
+                    cv2.putText(analysis_frame, "No pose data available", 
+                            (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+                # Ensure both frames have the same dimensions
+                if analysis_frame.shape != original_frame.shape:
+                    analysis_frame = cv2.resize(analysis_frame, (width, height))
+
+                # Side-by-side: original | analysis
+                combined = np.hstack([original_frame, analysis_frame])
+                out.write(combined)
+                processed_frames += 1
+
+                # Progress indicator
+                if frame_idx % 100 == 0:
+                    progress = (frame_idx / total_frames) * 100 if total_frames > 0 else 0
+                    print(f"Processing {os.path.basename(video_path)}: {progress:.1f}% ({frame_idx}/{total_frames})")
+
+                frame_idx += 1
+
+            print(f"✅ Analysis video saved: {output_path}")
+            print(f"📊 Processed {processed_frames} frames")
+
+        except Exception as e:
+            print(f"Error during video processing: {e}")
+            raise
+        finally:
+            cap.release()
+            out.release()
+
 
         
     def add_analysis_overlay(self, frame, keypoints_data, frame_idx):
@@ -136,36 +173,68 @@ class BadmintonVideoAnalyzer:
                 cv2.circle(frame, (x, y), 8, (0, 0, 0), 2)
 
     def draw_pose_landmarks(self, frame, pose_landmarks):
-        """Draw pose landmarks using MediaPipe's built-in drawing (like your working code)"""
+        """Draw pose landmarks manually without MediaPipe protobuf dependencies"""
         height, width = frame.shape[:2]
         
-        # Convert your pose_landmarks back to MediaPipe format
-        landmarks_list = []
+        # Define MediaPipe pose connections manually to avoid protobuf issues
+        pose_connections = [
+            # Face
+            (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8),
+            (9, 10),
+            # Arms
+            (11, 12), (11, 13), (13, 15), (15, 17), (15, 19), (15, 21), (17, 19),
+            (12, 14), (14, 16), (16, 18), (16, 20), (16, 22), (18, 20),
+            # Body
+            (11, 23), (12, 24), (23, 24),
+            # Legs
+            (23, 25), (25, 27), (27, 29), (27, 31), (29, 31),
+            (24, 26), (26, 28), (28, 30), (28, 32), (30, 32)
+        ]
+        
+        # Draw connections
+        for start_idx, end_idx in pose_connections:
+            if (start_idx < len(pose_landmarks) and end_idx < len(pose_landmarks) and
+                len(pose_landmarks[start_idx]) >= 4 and len(pose_landmarks[end_idx]) >= 4):
+                
+                # Check visibility
+                if (pose_landmarks[start_idx][3] > 0.5 and pose_landmarks[end_idx][3] > 0.5):
+                    start_point = (
+                        int(pose_landmarks[start_idx][0] * width),
+                        int(pose_landmarks[start_idx][1] * height)
+                    )
+                    end_point = (
+                        int(pose_landmarks[end_idx][0] * width),
+                        int(pose_landmarks[end_idx][1] * height)
+                    )
+                    
+                    # Ensure points are within frame bounds
+                    start_point = (max(0, min(width-1, start_point[0])), max(0, min(height-1, start_point[1])))
+                    end_point = (max(0, min(width-1, end_point[0])), max(0, min(height-1, end_point[1])))
+                    
+                    cv2.line(frame, start_point, end_point, (0, 255, 255), 2)
+        
+        # Draw landmarks
         for i, landmark in enumerate(pose_landmarks):
-            if len(landmark) >= 4:
-                # Create MediaPipe landmark object
-                mp_landmark = mp.framework.formats.landmark_pb2.NormalizedLandmark()
-                mp_landmark.x = float(landmark[0])
-                mp_landmark.y = float(landmark[1])
-                mp_landmark.z = float(landmark[2])
-                mp_landmark.visibility = float(landmark[3])
-                landmarks_list.append(mp_landmark)
-        
-        # Create landmark collection
-        pose_landmarks_proto = mp.framework.formats.landmark_pb2.NormalizedLandmarkList()
-        pose_landmarks_proto.landmark.extend(landmarks_list)
-        
-        # Draw using MediaPipe's method (same as your working code!)
-        mp_drawing = mp.solutions.drawing_utils
-        mp_pose = mp.solutions.pose
-        
-        mp_drawing.draw_landmarks(
-            frame, 
-            pose_landmarks_proto, 
-            mp_pose.POSE_CONNECTIONS,
-            mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=4),  # Landmarks
-            mp_drawing.DrawingSpec(color=(0, 255, 255), thickness=2, circle_radius=2)  # Connections
-        )
+            if len(landmark) >= 4 and landmark[3] > 0.5:  # Check visibility
+                x = int(landmark[0] * width)
+                y = int(landmark[1] * height)
+                
+                # Ensure point is within frame bounds
+                x = max(0, min(width-1, x))
+                y = max(0, min(height-1, y))
+                
+                # Different colors for different body parts
+                if i in [15, 16]:  # Wrists - red
+                    color = (0, 0, 255)
+                elif i in [11, 12]:  # Shoulders - green
+                    color = (0, 255, 0)
+                elif i in [23, 24]:  # Hips - blue
+                    color = (255, 0, 0)
+                else:  # Other landmarks - yellow
+                    color = (0, 255, 255)
+                
+                cv2.circle(frame, (x, y), 4, color, -1)
+                cv2.circle(frame, (x, y), 4, (0, 0, 0), 1)
 
     def add_movement_analysis(self, frame, keypoints_data, frame_idx):
         """Add movement detection overlays"""
@@ -439,44 +508,90 @@ class BadmintonVideoAnalyzer:
         return feedback if feedback else ["Good form! Keep it up!"]
 
     def create_3d_visualization(self, keypoints_data, frame_idx, save_path):
-        """Create 3D pose visualization"""
+        """Create improved 3D pose visualization with better coordinate handling"""
         try:
-            fig = plt.figure(figsize=(10, 8))
+            fig = plt.figure(figsize=AnalysisConfig.VIZ_FIGURE_SIZE)
             ax = fig.add_subplot(111, projection='3d')
             
             if frame_idx < len(keypoints_data):
                 pose = keypoints_data[frame_idx]
                 
-                # Plot 3D landmarks
-                xs = [landmark[0] for landmark in pose]
-                ys = [landmark[1] for landmark in pose]
-                zs = [landmark[2] for landmark in pose]
+                # Filter landmarks by visibility
+                valid_landmarks = []
+                valid_indices = []
                 
-                ax.scatter(xs, ys, zs, c='red', s=50)
+                for i, landmark in enumerate(pose):
+                    if len(landmark) >= 4 and landmark[3] > AnalysisConfig.MIN_VISIBILITY_THRESHOLD:
+                        valid_landmarks.append(landmark[:3])  # x, y, z only
+                        valid_indices.append(i)
                 
-                # Draw connections
+                if not valid_landmarks:
+                    print(f"No valid landmarks for frame {frame_idx}")
+                    return
+                
+                # Convert to numpy array for easier handling
+                landmarks_array = np.array(valid_landmarks)
+                
+                # Plot 3D landmarks with color coding
+                colors = ['red' if i in [LEFT_WRIST, RIGHT_WRIST] else 
+                         'blue' if i in [LEFT_SHOULDER, RIGHT_SHOULDER] else 
+                         'green' if i in [LEFT_HIP, RIGHT_HIP] else 'gray' 
+                         for i in valid_indices]
+                
+                ax.scatter(landmarks_array[:, 0], landmarks_array[:, 1], landmarks_array[:, 2], 
+                          c=colors, s=AnalysisConfig.VIZ_POINT_SIZE, alpha=0.8)
+                
+                # Draw connections only for visible landmarks
                 connections = [
                     (LEFT_SHOULDER, LEFT_ELBOW), (LEFT_ELBOW, LEFT_WRIST),
                     (RIGHT_SHOULDER, RIGHT_ELBOW), (RIGHT_ELBOW, RIGHT_WRIST),
                     (LEFT_HIP, LEFT_KNEE), (LEFT_KNEE, LEFT_ANKLE),
                     (RIGHT_HIP, RIGHT_KNEE), (RIGHT_KNEE, RIGHT_ANKLE),
-                    (LEFT_SHOULDER, RIGHT_SHOULDER), (LEFT_HIP, RIGHT_HIP)
+                    (LEFT_SHOULDER, RIGHT_SHOULDER), (LEFT_HIP, RIGHT_HIP),
+                    (LEFT_SHOULDER, LEFT_HIP), (RIGHT_SHOULDER, RIGHT_HIP)
                 ]
                 
-                for start, end in connections:
-                    ax.plot([xs[start], xs[end]], [ys[start], ys[end]], [zs[start], zs[end]], 'b-')
+                for start_idx, end_idx in connections:
+                    if (start_idx in valid_indices and end_idx in valid_indices and 
+                        pose[start_idx][3] > AnalysisConfig.MIN_VISIBILITY_THRESHOLD and 
+                        pose[end_idx][3] > AnalysisConfig.MIN_VISIBILITY_THRESHOLD):
+                        
+                        start_pos = pose[start_idx][:3]
+                        end_pos = pose[end_idx][:3]
+                        
+                        ax.plot([start_pos[0], end_pos[0]], 
+                               [start_pos[1], end_pos[1]], 
+                               [start_pos[2], end_pos[2]], 
+                               'b-', linewidth=AnalysisConfig.VIZ_LINE_WIDTH, alpha=0.7)
                 
-                ax.set_xlabel('X')
-                ax.set_ylabel('Y')
-                ax.set_zlabel('Z')
-                ax.set_title(f'3D Pose Visualization - Frame {frame_idx}')
+                # Set proper axis labels and limits
+                ax.set_xlabel('X (normalized)')
+                ax.set_ylabel('Y (normalized)')
+                ax.set_zlabel('Z (depth)')
+                ax.set_title(f'3D Pose Analysis - Frame {frame_idx}\nVisible landmarks: {len(valid_landmarks)}')
+                
+                # Set equal aspect ratio for better visualization
+                max_range = np.array([landmarks_array[:, 0].max() - landmarks_array[:, 0].min(),
+                                     landmarks_array[:, 1].max() - landmarks_array[:, 1].min(),
+                                     landmarks_array[:, 2].max() - landmarks_array[:, 2].min()]).max() / 2.0
+                
+                mid_x = (landmarks_array[:, 0].max() + landmarks_array[:, 0].min()) * 0.5
+                mid_y = (landmarks_array[:, 1].max() + landmarks_array[:, 1].min()) * 0.5
+                mid_z = (landmarks_array[:, 2].max() + landmarks_array[:, 2].min()) * 0.5
+                
+                ax.set_xlim(mid_x - max_range, mid_x + max_range)
+                ax.set_ylim(mid_y - max_range, mid_y + max_range)
+                ax.set_zlim(mid_z - max_range, mid_z + max_range)
                 
                 # Create directory if it doesn't exist
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                plt.savefig(save_path)
+                plt.savefig(save_path, dpi=150, bbox_inches='tight')
                 plt.close()
+                
         except Exception as e:
-            print(f"Error creating 3D visualization: {e}")
+            print(f"Error creating 3D visualization for frame {frame_idx}: {e}")
+            import traceback
+            traceback.print_exc()
 
     def analyze_current_movements(self, keypoints_data, frame_idx):
         """Analyze movements for current frame"""

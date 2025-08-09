@@ -131,12 +131,10 @@ def is_split_step(prev, curr, next_):
         right_ankle = np.array(get_landmark_xy(curr, RIGHT_ANKLE))
         feet_distance = np.linalg.norm(left_ankle - right_ankle)
 
-        return drop > 0.015 or rise < -0.015 and feet_distance > 0.1
+        return (drop > 0.015 or rise < -0.015) and feet_distance > 0.1
     except Exception as e:
         print("Error in split step detection:", e)
         return False
-
-import numpy as np
 
 def compute_chasse_features(frames, fps=30):  # Accept numpy array directly
     chasse_events = []
@@ -491,8 +489,16 @@ def get_video_fps(video_path):
 def main():
     """Main function to run the analysis"""
     try:
-        # Load keypoints
-        csv_path = "C:/Users/dhanu/OneDrive/Desktop/Projects/Badminton/Output/keypoints/sample1_keypoints.csv"
+        from config import ProjectPaths
+        
+        # Load keypoints (use first available video)
+        csv_path = ProjectPaths.get_keypoints_path(1)
+        
+        if not os.path.exists(csv_path):
+            print(f"❌ Keypoints file not found: {csv_path}")
+            print("Please run the main processor first to extract keypoints")
+            return
+            
         frames = load_keypoints_from_csv(csv_path)
         print(f"Loaded keypoints with shape: {frames.shape}")
         
@@ -509,7 +515,7 @@ def main():
         
         if stance_features_list:
             stance_df = pd.DataFrame(stance_features_list)
-            output_path = "C:/Users/dhanu/OneDrive/Desktop/Projects/Badminton/Output/features/stance_features.csv"
+            output_path = os.path.join(ProjectPaths.FEATURES_DIR, "stance_features.csv")
             
             # Create output directory if it doesn't exist
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -551,10 +557,14 @@ def main():
         for c in stroke_feats['contact_frames']:
             print(f"Frame {c['frame']} | Angle: {c['angle']:.2f}° | Wrist Speed: {c['wrist_speed']:.2f} m/s")
         
-        video_path = "C:/Users/dhanu/OneDrive/Desktop/Projects/Badminton/Videos/Video-2.mp4"
-        print("Video FPS:", get_video_fps(video_path))
-        reaction_time = compute_reaction_time(frames, fps=get_video_fps(video_path))
-        print("Reaction Time:", reaction_time['reaction_time'], "seconds")
+        # Use first available video for FPS
+        video_path = ProjectPaths.get_video_path("Video-1.mp4")
+        if os.path.exists(video_path):
+            print("Video FPS:", get_video_fps(video_path))
+            reaction_time = compute_reaction_time(frames, fps=get_video_fps(video_path))
+            print("Reaction Time:", reaction_time['reaction_time'], "seconds")
+        else:
+            print("Video file not found for FPS analysis")
 
     except Exception as e:
         print(f"Error in main function: {e}")
